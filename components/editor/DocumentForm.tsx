@@ -260,19 +260,53 @@ export default function DocumentForm({
   const handleDownloadPdf = async () => {
     setIsDownloading(true);
     try {
-      // First save to guarantee source of truth
-      const saveRes = await fetch('/api/documents', {
+      // 1. Asynchronously persist to database
+      fetch('/api/documents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(doc),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.success && data.document?.id) {
+            updateDoc({ id: data.document.id });
+          }
+        })
+        .catch((e) => console.warn('Background save note:', e));
+
+      // 2. Request PDF directly with dynamic document payload
+      const targetDocId = doc.id || 'preview';
+      const pdfRes = await fetch(`/api/documents/${targetDocId}/pdf?download=true`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(doc),
       });
-      const saveData = await saveRes.json();
-      const docId = saveData.document?.id || doc.id;
 
-      // Trigger download
-      window.open(`/api/documents/${docId}/pdf?download=true`, '_blank');
+      if (!pdfRes.ok) {
+        let errData: any = null;
+        try {
+          errData = await pdfRes.json();
+        } catch {
+          // Ignore JSON parse error
+        }
+        console.error('Server PDF Generation Failed:', errData);
+        alert('Unable to generate PDF. Please try again.');
+        return;
+      }
+
+      // 3. Trigger clean binary PDF download directly in browser
+      const blob = await pdfRes.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `${doc.documentNumber || 'document'}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(blobUrl);
     } catch (err: any) {
-      alert('Failed to generate PDF: ' + err.message);
+      console.error('Failed to generate PDF:', err);
+      alert('Unable to generate PDF. Please try again.');
     } finally {
       setIsDownloading(false);
     }

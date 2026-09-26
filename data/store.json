@@ -753,6 +753,44 @@
   ],
   "activityLogs": [
     {
+      "action": "PDF_GENERATED",
+      "description": "Generated PDF for V2LG-BILL-2026-001",
+      "user": "User",
+      "id": "act-1790441693124-zy8c",
+      "timestamp": "2026-09-26T16:54:53.124Z"
+    },
+    {
+      "action": "PDF_GENERATED",
+      "description": "Generated PDF for V2LG-INV-2026-001",
+      "user": "User",
+      "id": "act-1790441620832-17fy",
+      "timestamp": "2026-09-26T16:53:40.832Z"
+    },
+    {
+      "documentId": "doc-inv-001",
+      "action": "PDF_GENERATED",
+      "description": "Generated PDF for V2LG-INV-2026-001",
+      "user": "User",
+      "id": "act-1790441589304-5q2h",
+      "timestamp": "2026-09-26T16:53:09.304Z"
+    },
+    {
+      "documentId": "doc-bill-001",
+      "action": "PDF_GENERATED",
+      "description": "Generated PDF for V2LG-BILL-2026-001",
+      "user": "User",
+      "id": "act-1790441242350-o0f1",
+      "timestamp": "2026-09-26T16:47:22.350Z"
+    },
+    {
+      "documentId": "doc-inv-001",
+      "action": "PDF_GENERATED",
+      "description": "Generated PDF for V2LG-INV-2026-001",
+      "user": "User",
+      "id": "act-1790441205321-ogvq",
+      "timestamp": "2026-09-26T16:46:45.321Z"
+    },
+    {
       "documentId": "doc-inv-001",
       "action": "PDF_GENERATED",
       "description": "Generated PDF for V2LG-INV-2026-001",

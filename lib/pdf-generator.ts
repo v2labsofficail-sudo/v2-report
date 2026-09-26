@@ -11,6 +11,30 @@ export interface GeneratePdfOptions {
   organization: OrganizationSettings;
 }
 
+// Helper to robustly locate static assets across local development and Vercel serverless environments
+function findAssetFile(relativePath: string): Buffer | null {
+  const cleanPath = relativePath.replace(/^\//, '');
+  const candidatePaths = [
+    path.join(process.cwd(), 'public', cleanPath),
+    path.join(process.cwd(), cleanPath),
+    path.join(__dirname, '..', '..', '..', 'public', cleanPath),
+    path.join(__dirname, '..', 'public', cleanPath),
+    path.join('/var/task/public', cleanPath),
+    path.join('/var/task', cleanPath),
+  ];
+
+  for (const p of candidatePaths) {
+    try {
+      if (fs.existsSync(p)) {
+        return fs.readFileSync(p);
+      }
+    } catch {
+      // Continue to next candidate path
+    }
+  }
+  return null;
+}
+
 export async function generateDocumentPdf(options: GeneratePdfOptions): Promise<Uint8Array> {
   const { document: doc, template, organization: org } = options;
 
@@ -18,29 +42,38 @@ export async function generateDocumentPdf(options: GeneratePdfOptions): Promise<
   pdfDoc.registerFontkit(fontkit);
 
   // Load custom fonts with Rupee symbol support
-  const fontDir = path.join(process.cwd(), 'public', 'fonts');
-  const regularFontPath = path.join(fontDir, 'regular.ttf');
-  const boldFontPath = path.join(fontDir, 'bold.ttf');
+  const regBytes = findAssetFile('fonts/regular.ttf');
+  const boldBytes = findAssetFile('fonts/bold.ttf');
 
   let regularFont: PDFFont;
   let boldFont: PDFFont;
+  let isCustomFontLoaded = false;
 
-  if (fs.existsSync(regularFontPath) && fs.existsSync(boldFontPath)) {
-    const regBytes = fs.readFileSync(regularFontPath);
-    const boldBytes = fs.readFileSync(boldFontPath);
-    regularFont = await pdfDoc.embedFont(regBytes);
-    boldFont = await pdfDoc.embedFont(boldBytes);
+  if (regBytes && boldBytes) {
+    try {
+      regularFont = await pdfDoc.embedFont(regBytes);
+      boldFont = await pdfDoc.embedFont(boldBytes);
+      isCustomFontLoaded = true;
+    } catch (fontErr) {
+      console.warn('Failed to embed custom TTF fonts, falling back to standard Helvetica:', fontErr);
+      regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    }
   } else {
+    console.warn('Custom TTF fonts not found on disk, falling back to standard Helvetica');
     regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
     boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   }
 
   // Load master template background image
-  const templatePath = path.join(process.cwd(), 'public', template.background_image.replace(/^\//, ''));
   let embeddedBgImage = null;
-  if (fs.existsSync(templatePath)) {
-    const imgBytes = fs.readFileSync(templatePath);
-    embeddedBgImage = await pdfDoc.embedPng(imgBytes);
+  const bgBytes = findAssetFile(template.background_image);
+  if (bgBytes) {
+    try {
+      embeddedBgImage = await pdfDoc.embedPng(bgBytes);
+    } catch (imgErr) {
+      console.warn('Failed to embed template background PNG:', imgErr);
+    }
   }
 
   const a4Width = 595.28;
@@ -288,7 +321,7 @@ export async function generateDocumentPdf(options: GeneratePdfOptions): Promise<
     if (isBill) {
       page2.drawText('Duration', { x: 350, y: p2TableY - 17, size: 9, font: boldFont, color: rgb(1, 1, 1) });
     }
-    page2.drawText('Amount (₹)', { x: a4Width - 110, y: p2TableY - 17, size: 9, font: boldFont, color: rgb(1, 1, 1) });
+    page2.drawText(isCustomFontLoaded ? 'Amount (₹)' : 'Amount (Rs)', { x: a4Width - 110, y: p2TableY - 17, size: 9, font: boldFont, color: rgb(1, 1, 1) });
 
     let currentY = p2TableY - 24;
     const p2RowHeight = 36;
@@ -312,7 +345,7 @@ export async function generateDocumentPdf(options: GeneratePdfOptions): Promise<
       if (isBill && item.duration) {
         page2.drawText(item.duration, { x: 350, y: currentY + 12, size: 9, font: regularFont, color: navyColor });
       }
-      page2.drawText(formatINR(item.amount), { x: a4Width - 100, y: currentY + 12, size: 9.5, font: boldFont, color: navyColor });
+      page2.drawText(safeText(formatINR(item.amount)), { x: a4Width - 100, y: currentY + 12, size: 9.5, font: boldFont, color: navyColor });
     });
 
     // Total Amount Row on Page 2
@@ -327,7 +360,7 @@ export async function generateDocumentPdf(options: GeneratePdfOptions): Promise<
       borderColor: rgb(0.85, 0.88, 0.92),
     });
     page2.drawText('Total Amount', { x: 220, y: currentY + 9, size: 10, font: boldFont, color: navyColor });
-    page2.drawText(formatINR(doc.payment.totalAmount), { x: a4Width - 110, y: currentY + 9, size: 11, font: boldFont, color: navyColor });
+    page2.drawText(safeText(formatINR(doc.payment.totalAmount)), { x: a4Width - 110, y: currentY + 9, size: 11, font: boldFont, color: navyColor });
 
     // Payment Summary & Declaration on Page 2
     if (isInvoice) {
@@ -341,9 +374,9 @@ export async function generateDocumentPdf(options: GeneratePdfOptions): Promise<
         borderColor: rgb(0.85, 0.88, 0.92),
       });
       page2.drawText('PAYMENT SUMMARY', { x: 40, y: currentY + 75, size: 9.5, font: boldFont, color: navyColor });
-      page2.drawText(`Total Amount: ${formatINR(doc.payment.totalAmount)}`, { x: 40, y: currentY + 58, size: 9, font: boldFont, color: navyColor });
-      page2.drawText(`Amount Paid: ${formatINR(doc.payment.amountPaid)}`, { x: 40, y: currentY + 42, size: 9, font: regularFont, color: navyColor });
-      page2.drawText(`Balance: ${formatINR(doc.payment.balanceAmount)}`, { x: 40, y: currentY + 26, size: 9, font: boldFont, color: navyColor });
+      page2.drawText(safeText(`Total Amount: ${formatINR(doc.payment.totalAmount)}`), { x: 40, y: currentY + 58, size: 9, font: boldFont, color: navyColor });
+      page2.drawText(safeText(`Amount Paid: ${formatINR(doc.payment.amountPaid)}`), { x: 40, y: currentY + 42, size: 9, font: regularFont, color: navyColor });
+      page2.drawText(safeText(`Balance: ${formatINR(doc.payment.balanceAmount)}`), { x: 40, y: currentY + 26, size: 9, font: boldFont, color: navyColor });
       page2.drawText(`Status: ${doc.payment.status}`, { x: 40, y: currentY + 10, size: 9, font: boldFont, color: blueColor });
 
       // Declaration box on Page 2
@@ -377,31 +410,42 @@ export async function generateDocumentPdf(options: GeneratePdfOptions): Promise<
     });
   }
 
+  function safeText(str: string): string {
+    if (!str) return '';
+    if (!isCustomFontLoaded) {
+      return str.replace(/₹/g, 'Rs. ');
+    }
+    return str;
+  }
+
   // Helper functions for precise typography placement
   function drawTextAtCenterY(page: PDFPage, text: string, canvasX: number, centerCanvasY: number, font: PDFFont, fontSize: number, color: any) {
     if (!text) return;
+    const cleanStr = safeText(text);
     const px = toPdfX(canvasX);
     const py = toPdfBaselineY(centerCanvasY, fontSize);
     const scaledSize = toPdfSize(fontSize);
-    page.drawText(text, { x: px, y: py, size: scaledSize, font, color });
+    page.drawText(cleanStr, { x: px, y: py, size: scaledSize, font, color });
   }
 
   function drawTextCenteredAt(page: PDFPage, text: string, centerCanvasX: number, centerCanvasY: number, font: PDFFont, fontSize: number, color: any) {
     if (!text) return;
+    const cleanStr = safeText(text);
     const scaledSize = toPdfSize(fontSize);
-    const textWidth = font.widthOfTextAtSize(text, scaledSize);
+    const textWidth = font.widthOfTextAtSize(cleanStr, scaledSize);
     const px = toPdfX(centerCanvasX) - textWidth / 2;
     const py = toPdfBaselineY(centerCanvasY, fontSize);
-    page.drawText(text, { x: px, y: py, size: scaledSize, font, color });
+    page.drawText(cleanStr, { x: px, y: py, size: scaledSize, font, color });
   }
 
   function drawTextRightAligned(page: PDFPage, text: string, rightCanvasX: number, centerCanvasY: number, font: PDFFont, fontSize: number, color: any) {
     if (!text) return;
+    const cleanStr = safeText(text);
     const scaledSize = toPdfSize(fontSize);
-    const textWidth = font.widthOfTextAtSize(text, scaledSize);
+    const textWidth = font.widthOfTextAtSize(cleanStr, scaledSize);
     const px = toPdfX(rightCanvasX) - textWidth;
     const py = toPdfBaselineY(centerCanvasY, fontSize);
-    page.drawText(text, { x: px, y: py, size: scaledSize, font, color });
+    page.drawText(cleanStr, { x: px, y: py, size: scaledSize, font, color });
   }
 
   function drawTextWrappedLines(
@@ -417,10 +461,11 @@ export async function generateDocumentPdf(options: GeneratePdfOptions): Promise<
     maxLines = 4
   ) {
     if (!text) return;
+    const cleanStr = safeText(text);
     const scaledSize = toPdfSize(fontSize);
     const scaledMaxWidth = toPdfX(maxCanvasWidth);
 
-    const words = text.split(' ');
+    const words = cleanStr.split(' ');
     const lines: string[] = [];
     let currentLine = '';
 

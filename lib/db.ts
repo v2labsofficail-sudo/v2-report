@@ -24,48 +24,89 @@ interface AppStore {
   activityLogs: ActivityLog[];
 }
 
+declare global {
+  var __v2_store: AppStore | undefined;
+}
+
 const DATA_DIR = path.join(process.cwd(), 'data');
 const STORE_FILE = path.join(DATA_DIR, 'store.json');
+const TMP_STORE_FILE = path.join('/tmp', 'v2-store.json');
 
 function ensureStore(): AppStore {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (globalThis.__v2_store) {
+    return globalThis.__v2_store;
   }
 
-  if (!fs.existsSync(STORE_FILE)) {
-    const initialStore: AppStore = {
-      organization: initialOrganization,
-      clients: initialClients,
-      templates: initialTemplates,
-      documents: initialDocuments,
-      activityLogs: initialActivityLogs,
-    };
-    fs.writeFileSync(STORE_FILE, JSON.stringify(initialStore, null, 2), 'utf-8');
-    return initialStore;
+  // 1. Try reading from primary store file
+  if (fs.existsSync(STORE_FILE)) {
+    try {
+      const raw = fs.readFileSync(STORE_FILE, 'utf-8');
+      const parsed = JSON.parse(raw) as AppStore;
+      globalThis.__v2_store = parsed;
+      return parsed;
+    } catch (e) {
+      console.warn('Could not parse STORE_FILE, trying fallback:', e);
+    }
   }
 
+  // 2. Try reading from /tmp store file (for Vercel serverless containers)
   try {
-    const raw = fs.readFileSync(STORE_FILE, 'utf-8');
-    return JSON.parse(raw) as AppStore;
-  } catch (err) {
-    console.error('Error reading store file, resetting to initial', err);
-    const initialStore: AppStore = {
-      organization: initialOrganization,
-      clients: initialClients,
-      templates: initialTemplates,
-      documents: initialDocuments,
-      activityLogs: initialActivityLogs,
-    };
-    fs.writeFileSync(STORE_FILE, JSON.stringify(initialStore, null, 2), 'utf-8');
-    return initialStore;
+    if (fs.existsSync(TMP_STORE_FILE)) {
+      const raw = fs.readFileSync(TMP_STORE_FILE, 'utf-8');
+      const parsed = JSON.parse(raw) as AppStore;
+      globalThis.__v2_store = parsed;
+      return parsed;
+    }
+  } catch (e) {
+    // Ignore tmp read errors
   }
+
+  // 3. Fallback to initial seed data
+  const initialStore: AppStore = {
+    organization: initialOrganization,
+    clients: initialClients,
+    templates: initialTemplates,
+    documents: initialDocuments,
+    activityLogs: initialActivityLogs,
+  };
+  globalThis.__v2_store = initialStore;
+
+  // Attempt safe persistence (do not throw if read-only filesystem)
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(STORE_FILE, JSON.stringify(initialStore, null, 2), 'utf-8');
+  } catch (err) {
+    // Primary path is read-only (e.g. Vercel /var/task), try /tmp
+    try {
+      fs.writeFileSync(TMP_STORE_FILE, JSON.stringify(initialStore, null, 2), 'utf-8');
+    } catch {
+      // Ephemeral in-memory is active
+    }
+  }
+
+  return initialStore;
 }
 
 function saveStore(store: AppStore): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  globalThis.__v2_store = store;
+
+  // Try writing to primary data store
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2), 'utf-8');
+    return;
+  } catch (err) {
+    // On Vercel /var/task is read-only (EROFS), write to /tmp instead
+    try {
+      fs.writeFileSync(TMP_STORE_FILE, JSON.stringify(store, null, 2), 'utf-8');
+    } catch (tmpErr) {
+      console.warn('Could not persist store to disk, relying on in-memory store:', tmpErr);
+    }
   }
-  fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2), 'utf-8');
 }
 
 // ----------------- Organization -----------------
@@ -161,7 +202,9 @@ export function getTemplates(): DocumentTemplate[] {
 
 export function getTemplate(id: string): DocumentTemplate | undefined {
   const store = ensureStore();
-  return store.templates.find((t) => t.id === id);
+  const found = store.templates.find((t) => t.id === id);
+  if (found) return found;
+  return initialTemplates.find((t) => t.id === id);
 }
 
 export function saveTemplate(template: DocumentTemplate): DocumentTemplate {
@@ -212,7 +255,9 @@ export function getDocuments(): DocumentRecord[] {
 
 export function getDocument(id: string): DocumentRecord | undefined {
   const store = ensureStore();
-  return store.documents.find((d) => d.id === id);
+  const found = store.documents.find((d) => d.id === id);
+  if (found) return found;
+  return initialDocuments.find((d) => d.id === id);
 }
 
 export function saveDocument(docData: Omit<DocumentRecord, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): DocumentRecord {

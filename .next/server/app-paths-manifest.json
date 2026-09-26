@@ -1,7 +1,20 @@
 {
   "/_not-found/page": "app/_not-found/page.js",
-  "/documents/page": "app/documents/page.js",
-  "/page": "app/page.js",
+  "/api/clients/[id]/route": "app/api/clients/[id]/route.js",
+  "/api/activity/route": "app/api/activity/route.js",
+  "/api/documents/[id]/duplicate/route": "app/api/documents/[id]/duplicate/route.js",
+  "/api/documents/[id]/route": "app/api/documents/[id]/route.js",
+  "/api/organization/route": "app/api/organization/route.js",
   "/api/clients/route": "app/api/clients/route.js",
-  "/api/documents/route": "app/api/documents/route.js"
+  "/api/templates/route": "app/api/templates/route.js",
+  "/api/documents/route": "app/api/documents/route.js",
+  "/clients/page": "app/clients/page.js",
+  "/activity/page": "app/activity/page.js",
+  "/documents/[id]/page": "app/documents/[id]/page.js",
+  "/documents/page": "app/documents/page.js",
+  "/documents/new/page": "app/documents/new/page.js",
+  "/page": "app/page.js",
+  "/settings/page": "app/settings/page.js",
+  "/templates/designer/page": "app/templates/designer/page.js",
+  "/api/documents/[id]/pdf/route": "app/api/documents/[id]/pdf/route.js"
 }
